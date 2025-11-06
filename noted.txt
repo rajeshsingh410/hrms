@@ -1,0 +1,590 @@
+home screen ol code befure punchin 
+
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, { useState, useEffect } from 'react';
+import {
+    View, Text, TouchableOpacity, SafeAreaView,
+    Image, ScrollView, Platform, PermissionsAndroid,
+    StyleSheet,
+    TextInput,
+    Alert
+} from 'react-native';
+import Ionicons from 'react-native-vector-icons/Ionicons';
+import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
+import { useDispatch, useSelector } from 'react-redux';
+import { launchCamera } from 'react-native-image-picker';
+import Geolocation from '@react-native-community/geolocation';
+import { attendanceDataAsunc } from '../services/Actions/employeeAction';
+
+// ================================
+// Main HomeScreen Component
+// ================================
+const HomeScreen = ({ navigation }) => {
+
+    const dispatch = useDispatch()
+    // ================================
+    // Local States
+    // ================================
+    const attResponse = useSelector(state => state.employee.attResponse);
+
+    const [employee, setEmployee] = useState({});
+    const [remark, setRemark] = useState("");
+    const [showPunchCard, setShowPunchCard] = useState(false);
+    const [capturedImage, setCapturedImage] = useState({});
+    const [location, setLocation] = useState(null);
+    const [isPunchedIn, setIsPunchedIn] = useState(false);
+
+    const [punchInTime, setPunchInTime] = useState(null);
+    const [punchOutTime, setPunchOutTime] = useState(null);
+    const [totalHours, setTotalHours] = useState('--:--:--');
+    const [currentTime, setCurrentTime] = useState('');
+    // ================================
+    // Auto-update Current Time
+    // ================================
+    useEffect(() => {
+        const timer = setInterval(() => {
+            const now = new Date();
+            const formattedTime = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+            setCurrentTime(formattedTime);
+
+            if (isPunchedIn && punchInTime) updateTotalHours(now);
+        }, 1000);
+
+        return () => clearInterval(timer);
+    }, [isPunchedIn, punchInTime]);
+
+    // ================================
+    // Load Employee from AsyncStorage
+    // ================================
+    useEffect(() => {
+        const checkLoginStatus = async () => {
+            try {
+                const userStr = await AsyncStorage.getItem('user');
+                if (userStr) {
+                    const user = JSON.parse(userStr);
+                    setEmployee(user.employee);
+                }
+
+                const punchVal = await AsyncStorage.getItem('userPunchedIn');
+                const chackPunch = JSON.parse(punchVal)
+                console.log('Punch flag:', chackPunch);
+                if (chackPunch === 200) {
+                    setIsPunchedIn(true);
+                    setShowPunchCard(false);
+                }
+            } catch (err) {
+                console.error('Failed to load from AsyncStorage', err);
+            }
+        };
+        checkLoginStatus();
+    }, []);
+
+
+    // useEffect(() => {
+    //     const check = async () => {
+    //         const val = await AsyncStorage.getItem('userPunchedIn');
+    //         console.log('Stored punch:', val);
+    //         if (val === 'true') {
+    //             setIsPunchedIn(true);
+    //             setShowPunchCard(false);
+    //         }
+    //     };
+    //     check();
+    // }, []);
+
+
+    useEffect(() => {
+        if (attResponse) {
+            if (attResponse.status === 'success') {
+                Alert.alert('Success', attResponse.message || 'Attendance recorded');
+            } else {
+                Alert.alert('Error', attResponse.message || 'Something went wrong');
+            }
+        }
+    }, [attResponse]);
+
+    // ================================
+    // Time Calculation Function
+    // ================================
+    const updateTotalHours = (now) => {
+        const diffMs = now - punchInTime;
+        const diffHrs = Math.floor(diffMs / 3600000);
+        const diffMin = Math.floor((diffMs % 3600000) / 60000);
+        const diffSec = Math.floor((diffMs % 60000) / 1000);
+        setTotalHours(
+            `${diffHrs.toString().padStart(2, '0')}:${diffMin.toString().padStart(2, '0')}:${diffSec.toString().padStart(2, '0')}`
+        );
+    };
+
+    // ================================
+    // Navigate to Profile
+    // ================================
+    const handleProfile = () => {
+        navigation.navigate('Profile');
+    };
+
+    // ================================
+    // Request Camera Permission
+    // ================================
+    const requestCameraPermission = async () => {
+        if (Platform.OS === 'android') {
+            try {
+                const granted = await PermissionsAndroid.request(
+                    PermissionsAndroid.PERMISSIONS.CAMERA,
+                    {
+                        title: "Camera Permission",
+                        message: "App needs camera access to take pictures",
+                        buttonNeutral: "Ask Me Later",
+                        buttonNegative: "Cancel",
+                        buttonPositive: "OK"
+                    }
+                );
+                return granted === PermissionsAndroid.RESULTS.GRANTED;
+            } catch (err) {
+                console.warn("Camera permission error", err);
+                return false;
+            }
+        }
+        return true;
+    };
+
+    // ================================
+    // Request Location Permission
+    // ================================
+    const requestLocationPermission = async () => {
+        if (Platform.OS === 'android') {
+            try {
+                const granted = await PermissionsAndroid.request(
+                    PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+                    {
+                        title: "Location Permission Required",
+                        message: "This app needs to access your location",
+                        buttonNeutral: "Ask Me Later",
+                        buttonNegative: "Cancel",
+                        buttonPositive: "OK"
+                    }
+                );
+                return granted === PermissionsAndroid.RESULTS.GRANTED;
+            } catch (err) {
+                console.warn("Location permission error", err);
+                return false;
+            }
+        }
+        return true;
+    };
+
+    // ================================
+    // Handle Punch In / Punch Out
+    // ================================
+    const handlePunch = async () => {
+        const now = new Date();
+        if (!isPunchedIn) {
+            setPunchInTime(now);
+            const camOk = await requestCameraPermission();
+            if (!camOk) return;
+            launchCamera(
+                { mediaType: 'photo', cameraType: 'back', saveToPhotos: false },
+                resp => {
+                    if (!resp.didCancel && resp.assets?.length) {
+                        setCapturedImage(resp.assets[0]);
+                        setShowPunchCard(true);
+                    }
+                }
+            );
+            if (await requestLocationPermission()) {
+                Geolocation.getCurrentPosition(
+                    pos => setLocation({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+                    err => console.warn("Location error:", err),
+                    { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
+                );
+            }
+            // setIsPunchedIn(true);
+
+        } else {
+            setPunchOutTime(now);
+            updateTotalHours(now);
+            setShowPunchCard(false);
+            setIsPunchedIn(false);
+            AsyncStorage.removeItem('userPunchedIn');
+        }
+    };
+
+
+    // ================================
+    // Utility: Format time
+    // ================================
+    const formatTime = (dateObj) => {
+        if (!dateObj) return '--:--';
+        return dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+    };
+
+
+    const handleAttandance = async () => {
+        const empid = employee.empid;
+        const lati = location?.latitude || '';
+        const longi = location?.longitude || '';
+
+        const formattedPunchIn = punchInTime
+            ? punchInTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+            : '';
+
+        const formattedDate = punchInTime
+            ? punchInTime.toLocaleDateString('en-CA') // gives YYYY-MM-DD
+            : new Date().toLocaleDateString('en-CA');
+
+        const formData = new FormData();
+
+        formData.append('empid', empid);
+        formData.append('attdate', formattedDate);
+        formData.append('intime', formattedPunchIn);
+        formData.append('lati', lati.toString());
+        formData.append('longi', longi.toString());
+        formData.append('remark', remark);
+
+        // ✅ Append image properly
+        if (capturedImage && capturedImage.uri) {
+            formData.append('fileName', {
+                uri: capturedImage.uri,
+                name: capturedImage.fileName || 'photo.jpg',
+                type: capturedImage.type || 'image/jpeg', // or 'image/png'
+            });
+        }
+
+        // Dispatch to Redux
+        dispatch(attendanceDataAsunc(formData));
+    };
+
+
+
+
+    // ================================
+    // Render JSX UI
+    // ================================
+
+    return (
+        <SafeAreaView style={styles.container}>
+            <View style={styles.header}>
+                <View style={styles.headerLeft}>
+                    <TouchableOpacity onPress={handleProfile}>
+                        <Image
+                            source={{ uri: 'https://images.unsplash.com/photo-1595152772835-219674b2a8a6?crop=faces&fit=crop&w=300&h=300' }}
+                            style={styles.profilePic}
+                        />
+                    </TouchableOpacity>
+                    <View style={{ marginLeft: 10 }}>
+                        <Text style={styles.heyText}>{employee.empname}</Text>
+                        <Text style={styles.empCode}>{employee.empcode}</Text>
+                    </View>
+                </View>
+                {/* <TouchableOpacity>
+                    <Ionicons name="refresh" size={24} color="#E53935" />
+                </TouchableOpacity> */}
+            </View>
+
+            <View style={styles.punchContainer}>
+                <Text style={styles.time}>{currentTime}</Text>
+                <Text style={styles.date}>{new Date().toDateString()}</Text>
+
+                {!isPunchedIn ? (
+                    <TouchableOpacity style={styles.circle} onPress={handlePunch}>
+                        <MaterialIcons name="fingerprint" size={40} color="#E53935" />
+                        <Text style={styles.punchText}>PUNCH IN</Text>
+                    </TouchableOpacity>
+                ) : (
+                    <View style={styles.punchOutRow}>
+                        {/* <View style={{ alignItems: 'center' }}>
+                            <Text style={styles.timeLabel}>{currentTime}</Text>
+                            <Text style={styles.timeSubLabel}>Current Time</Text>
+                        </View> */}
+                        <TouchableOpacity style={styles.punchOutBtn} onPress={handlePunch}>
+                            <MaterialIcons name="fingerprint" size={30} color="#E53935" />
+                            <Text style={styles.punchText}>PUNCH OUT</Text>
+                        </TouchableOpacity>
+                    </View>
+                )}
+
+            </View>
+
+            {showPunchCard && (
+                <View style={styles.punchCard}>
+                    {/* Header */}
+                    <View style={styles.cardHeader}>
+                        <Text style={styles.cardHeaderText}>{new Date().toDateString()}</Text>
+                        <Text style={[styles.cardHeaderText, styles.cardHeaderTitle]}>Attendance</Text>
+                        <TouchableOpacity onPress={() => setShowPunchCard(false)}>
+                            <Ionicons name="close" size={20} color="white" />
+                        </TouchableOpacity>
+                    </View>
+
+                    {/* User Info */}
+                    <View style={styles.userInfoRow}>
+
+                        <View style={styles.userImageWrapper}>
+                            <Image source={{ uri: capturedImage.uri }} style={styles.userImage} />
+                        </View>
+
+                        <View style={styles.userInfoText}>
+                            <Text style={styles.userName}>NAME : - {employee.empname}</Text>
+                            <Text style={styles.userId}>EMP-ID: - {employee.empcode || '---'}</Text>
+                        </View>
+                    </View>
+
+                    {/* Location */}
+                    {location && (
+                        <Text style={styles.locationText}>
+                            Location: {location.latitude.toFixed(4)}, {location.longitude.toFixed(4)}
+                        </Text>
+                    )}
+
+                    {/* Time & Submit */}
+                    <View style={styles.footerRow}>
+                        <View style={styles.inputWrapper}>
+                            <TextInput
+                                style={styles.remarkInput}
+                                placeholder="Enter Remark"
+                                placeholderTextColor="#888"
+                                multiline={true}
+                                numberOfLines={4}
+                                value={remark}
+                                onChangeText={(text) => setRemark(text)}
+                            />
+                        </View>
+
+                        <TouchableOpacity style={styles.submitBtn} onPress={handleAttandance}>
+                            <Text style={styles.submitBtnText}>Submit</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            )}
+
+            {!showPunchCard && (
+                <ScrollView contentContainerStyle={styles.newSections} showsVerticalScrollIndicator={false}>
+                    {/* Top to bottom sections */}
+                    <View style={styles.section}>
+                        <Text style={styles.sectionTitle}>Off this week</Text>
+                        <ScrollView>
+                            {['Anjali Sharma', 'Rohit Mehra', 'Simran Kaur'].map((name, index) => (
+                                <View key={index} style={styles.rowWithIcon}>
+                                    <Ionicons name="person-outline" size={20} color="#E53935" style={styles.iconLeft} />
+                                    <Text style={styles.bdayName}>{name} (12 Jul - 18 Jul)</Text>
+                                </View>
+                            ))}
+                        </ScrollView>
+                    </View>
+
+                    {/* Wish them section */}
+                    <View style={styles.section}>
+                        <Text style={styles.sectionTitle}>Wish them</Text>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                            {[
+                                { name: 'Parvinder ', date: '20 Jul', initials: 'PA' },
+                                { name: 'Suman', date: '21 Jul', initials: 'SU' },
+                                { name: 'Ajay', date: '22 Jul', initials: 'AJ' },
+                                { name: 'Kriti', date: '23 Jul', initials: 'KR' },
+                                { name: 'Dev', date: '24 Jul', initials: 'DE' }
+                            ].map((person, index) => (
+                                <View key={index} style={{ alignItems: 'center', marginRight: 15, }}>
+                                    <View style={styles.birthdayIcon}>
+                                        <Text style={{ color: '#fff' }}>{person.initials}</Text>
+                                    </View>
+                                    <View>
+                                        <Text style={styles.bdayName}>{person.name}</Text>
+                                        <Text style={styles.bdayDate}>{person.date}</Text>
+                                    </View>
+                                </View>
+                            ))}
+                        </ScrollView>
+                    </View>
+
+                    <View style={styles.section}>
+                        <Text style={styles.sectionTitle}>Announcements</Text>
+                        <ScrollView>
+                            <Text style={styles.sectionSub}>No announcements for now</Text>
+                        </ScrollView>
+                    </View>
+
+                    <View style={styles.section}>
+                        <Text style={styles.sectionTitle}>Wall</Text>
+                        <Text style={styles.sectionSub}>There are no posts here</Text>
+                        <TouchableOpacity style={styles.postBtn}>
+                            <Text style={styles.postBtnText}>Create first post</Text>
+                        </TouchableOpacity>
+                    </View>
+
+                    <View style={styles.section}>
+                        <Text style={styles.sectionTitle}>Upcoming holidays</Text>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                            {[
+                                { title: 'Raksha Bandhan', date: '09 Aug 2025' },
+                                { title: 'Independence Day', date: '15 Aug 2025' },
+                                { title: 'Ganesh Chaturthi', date: '28 Aug 2025' },
+                                { title: 'Diwali', date: '12 Nov 2025' },
+                                { title: 'Christmas', date: '25 Dec 2025' }
+                            ].map((holiday, index) => (
+                                <View key={index} style={styles.holidayCard}>
+                                    <Ionicons name="calendar-outline" size={16} color="#E53935" style={{ marginRight: 5 }} />
+                                    <View>
+                                        <Text style={styles.holidayTitle}>{holiday.title}</Text>
+                                        <Text style={styles.holidayDate}>{holiday.date}</Text>
+                                    </View>
+                                </View>
+                            ))}
+                        </ScrollView>
+                    </View>
+                </ScrollView>
+            )
+            }
+        </SafeAreaView>
+    );
+};
+export default HomeScreen;
+
+const styles = StyleSheet.create({
+    container: { flex: 1, backgroundColor: '#F5F5F5' },
+    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, backgroundColor: '#fff' },
+    headerLeft: { flexDirection: 'row', alignItems: 'center' },
+    profilePic: { width: 40, height: 40, borderRadius: 20 },
+    heyText: { fontSize: 16, fontWeight: 'bold' },
+    empCode: { fontSize: 12, color: 'gray' },
+
+    punchCard: { marginTop: 20, backgroundColor: '#fff', padding: 15, borderRadius: 12, elevation: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.2, shadowRadius: 3, alignItems: 'center', width: '90%', alignSelf: 'center' },
+    cardHeader: { backgroundColor: '#E53935', padding: 10, borderTopLeftRadius: 12, borderTopRightRadius: 12, width: '100%', borderBottomWidth: 1, borderBottomColor: '#ddd', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    cardHeaderText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
+    cardHeaderTitle: { textAlign: 'center', flex: 1 },
+
+    userInfoRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 15, width: '100%', borderBottomWidth: 1, borderBottomColor: '#ddd' },
+    userInfoText: { flex: 1, paddingLeft: 15 },
+    userName: { fontSize: 16, fontWeight: 'bold' },
+    userId: { fontSize: 14, color: 'gray' },
+    userImageWrapper: { width: 80, height: 80, backgroundColor: '#fff', borderRadius: 40, justifyContent: 'flex-start', alignItems: 'center', marginLeft: 10, overflow: 'hidden', elevation: 4 },
+    userImage: { width: 80, height: 80, borderRadius: 40 },
+
+    locationText: { color: '#E53935', fontSize: 14, marginBottom: 5, borderBottomWidth: 1, borderBottomColor: '#ddd', width: '100%', paddingBottom: 8, textAlign: 'center' },
+
+    footerRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 10,
+        marginTop: 10,
+    },
+    inputWrapper: {
+        flex: 1,
+        marginRight: 10,
+    },
+    remarkInput: {
+        borderWidth: 1,
+        borderColor: '#ccc',
+        borderRadius: 10,
+        paddingHorizontal: 15,
+        paddingVertical: 10,
+        fontSize: 16,
+        backgroundColor: '#f9f9f9',
+        color: '#000',
+    },
+    submitBtn: {
+        backgroundColor: '#e53935',
+        paddingVertical: 10,
+        paddingHorizontal: 18,
+        borderRadius: 8,
+    },
+    submitBtnText: {
+        color: '#fff',
+        fontWeight: 'bold',
+        fontSize: 16,
+    },
+    cardTimeText: { color: '#000', fontSize: 14, marginBottom: 8 },
+    submitBtn: { marginTop: 5, backgroundColor: '#E53935', paddingVertical: 10, paddingHorizontal: 25, borderRadius: 8 },
+    submitBtnText: { color: '#fff', fontWeight: 'bold' },
+
+    punchContainer: { padding: 16, backgroundColor: '#fff' },
+    time: { fontSize: 36, fontWeight: 'bold', marginBottom: 5, textAlign: 'center' },
+    date: { fontSize: 14, color: 'gray', marginBottom: 10, textAlign: 'center' },
+    circle: { width: 150, height: 150, borderWidth: 8, borderColor: '#E53935', borderRadius: 75, justifyContent: 'center', alignItems: 'center', alignSelf: 'center', marginVertical: 10 },
+    punchText: { marginTop: 10, fontWeight: 'bold' },
+    punchOutRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', marginVertical: 10 },
+    punchOutBtn: { borderWidth: 2, borderColor: '#E53935', padding: 10, borderRadius: 10, alignItems: 'center' },
+
+    // timeRow: { flexDirection: 'row', justifyContent: 'space-around', marginTop: 10 },
+    // timeBox: { alignItems: 'center' },
+    // timeLabel: { fontWeight: 'bold', fontSize: 14 },
+    // timeSubLabel: { fontSize: 12, color: 'gray' },
+
+    section: { backgroundColor: '#fff', paddingHorizontal: 10, paddingVertical: 15, borderRadius: 8, marginTop: 10, width: '100%' },
+    sectionTitle: { fontWeight: 'bold', fontSize: 14, marginBottom: 5 },
+    sectionSub: { fontSize: 12, color: '#777', textAlign: 'center' },
+
+    birthdayRow: { flexDirection: 'column', alignItems: 'flex-start' },
+    birthdayIcon: { width: 35, height: 35, borderRadius: 18, backgroundColor: '#E53935', justifyContent: 'center', alignItems: 'center', marginRight: 8 },
+    rowWithIcon: { flexDirection: 'row', alignItems: 'center', marginBottom: 5 },
+    iconLeft: { marginRight: 8 },
+    bdayName: { fontWeight: 'bold' },
+    birthdayItem: { alignItems: 'center', marginRight: 10 },
+
+    postBtn: { backgroundColor: '#E53935', padding: 6, borderRadius: 5, alignSelf: 'center', marginTop: 5 },
+    postBtnText: { color: '#fff', fontSize: 12 },
+
+    holidayCard: { backgroundColor: '#FFEBEE', padding: 10, borderRadius: 5, flexDirection: 'row', alignItems: 'center', marginRight: 10 },
+    holidayTitle: { fontWeight: 'bold' },
+    holidayDate: { fontSize: 12, color: '#555' },
+
+    newSections: { padding: 16 },
+});
+
+
+
+===================================
+
+/   firebase token generate or save in databse  
+
+  //FIREBASE PUSHNOTIFICATION TOKEN SAVE TO SERVER
+    // useEffect(() => {
+    //     if (!employee?.empid) return;
+
+    //     // 1. Create Android Notification Channel
+    //     const createChannel = async () => {
+    //         await notifee.createChannel({
+    //             id: 'default',
+    //             name: 'Default Channel',
+    //             importance: AndroidImportance.HIGH,
+    //         });
+    //     };
+    //     createChannel();
+
+    //     // 2. Get FCM Token and save to server
+    //     const saveToken = async () => {
+    //         const token = await messaging().getToken();
+
+    //         await axios.post("http://10.0.2.2:80/HRMS/controller/saveToken.php", {
+    //             user_id: employee.empid,
+    //             fcm_token: token,
+    //         });
+    //     };
+    //     saveToken();
+
+    //     // 3. Handle Token Refresh
+    //     const unsubscribeToken = messaging().onTokenRefresh(async (newToken) => {
+    //         await axios.post("http://10.0.2.2:80/HRMS/controller/saveToken.php", {
+    //             user_id: employee.empid,
+    //             fcm_token: newToken,
+    //         });
+    //     });
+
+    //     // 4. Foreground Message Listener
+    //     const unsubscribeMessage = messaging().onMessage(async remoteMessage => {
+    //         console.log('FCM Message Data:', remoteMessage);
+
+    //         // Show local notification
+    //         await notifee.displayNotification({
+    //             title: remoteMessage.notification?.title,
+    //             body: remoteMessage.notification?.body,
+    //             android: {
+    //                 channelId: 'default',
+    //             },
+    //         });
+    //     });
+
+    //     return () => {
+    //         unsubscribeToken();
+    //         unsubscribeMessage();
+    //     };
+    // }, [employee?.empid]);
