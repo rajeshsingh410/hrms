@@ -1,0 +1,47 @@
+name: Build iOS IPA (React Native)
+
+on:
+  push:
+    branches:
+      - main  # jab aap main branch me push karenge tab chalega
+
+jobs:
+  build:
+    runs-on: macos-latest  # iOS build ke liye mac chahiye
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Install dependencies
+        run: |
+          npm install
+          cd ios
+          pod install
+          cd ..
+
+      - name: Build .ipa file
+        run: |
+          cd ios
+          xcodebuild \
+            -workspace YourApp.xcworkspace \
+            -scheme YourApp \
+            -configuration Release \
+            -archivePath $PWD/build/YourApp.xcarchive archive
+
+          xcodebuild -exportArchive \
+            -archivePath $PWD/build/YourApp.xcarchive \
+            -exportOptionsPlist exportOptions.plist \
+            -exportPath $PWD/build
+
+      - name: Upload .ipa file
+        uses: actions/upload-artifact@v4
+        with:
+          name: YourApp-IPA
+          path: ios/build/*.ipa
+
